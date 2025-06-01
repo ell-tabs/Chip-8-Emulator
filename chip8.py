@@ -1,14 +1,33 @@
-from .constants import (
-    START_ADDRESS,
-    FONTSET_START_ADDRESS,
-    FONTSET_SIZE,
-    VIDEO_WIDTH,
-    VIDEO_HEIGHT,
-    fontset
-)
 import random
-import time
+import pygame
 import numpy as np
+import time
+import sys
+
+VIDEO_WIDTH = 64
+VIDEO_HEIGHT = 32
+START_ADDRESS = 0x200
+FONTSET_SIZE = 80
+FONTSET_START_ADDRESS = 0x50
+
+fontset = [
+    0xF0, 0x90, 0x90, 0x90, 0xF0, # 0
+    0x20, 0x60, 0x20, 0x20, 0x70, # 1
+    0xF0, 0x10, 0xF0, 0x80, 0xF0, # 2
+    0xF0, 0x10, 0xF0, 0x10, 0xF0, # 3
+    0x90, 0x90, 0xF0, 0x10, 0x10, # 4
+    0xF0, 0x80, 0xF0, 0x10, 0xF0, # 5
+    0xF0, 0x80, 0xF0, 0x90, 0xF0, # 6
+    0xF0, 0x10, 0x20, 0x40, 0x40, # 7
+    0xF0, 0x90, 0xF0, 0x90, 0xF0, # 8
+    0xF0, 0x90, 0xF0, 0x10, 0xF0, # 9
+    0xF0, 0x90, 0xF0, 0x90, 0x90, # A
+    0xE0, 0x90, 0xE0, 0x90, 0xE0, # B
+    0xF0, 0x80, 0x80, 0x80, 0xF0, # C
+    0xE0, 0x90, 0x90, 0x90, 0xE0, # D
+    0xF0, 0x80, 0xF0, 0x80, 0xF0, # E
+    0xF0, 0x80, 0xF0, 0x80, 0x80  # F
+]
 
 class Chip8:
     def __init__(self):
@@ -86,46 +105,31 @@ class Chip8:
         code = self.opcode & 0x000F
         if code in self.table8:
             self.table8[code]()
-        else:
-            pass
 
     def Table0(self):
         code = self.opcode & 0x00FF
         if code in self.table0:
             self.table0[code]()
-        else:
-            pass
 
     def TableE(self):
         code = self.opcode & 0x000F
         if code in self.tableE:
             self.tableE[code]()
-        else:
-            pass
 
     def TableF(self):
         code = self.opcode & 0x00FF
         if code in self.tableF:
             self.tableF[code]()
-        else:
-            pass
 
     def cycle(self):
-        if self.pc >= len(self.memory) - 1:
-            print(f"Program counter out of bounds: {self.pc}")
-            return
-
         self.opcode = (self.memory[self.pc] << 8) | self.memory[self.pc + 1]
-        print(f"PC: {self.pc}, Opcode: 0x{self.opcode:04X}")
+        prev_pc = self.pc
+        self.table[(self.opcode & 0xF000) >> 12]()
+        # If opcode didn't change PC, advance it by 2
+        if self.pc == prev_pc:
+            self.pc += 2
 
-        try:
-            prev_pc = self.pc
-            self.table[(self.opcode & 0xF000) >> 12]()
-            if self.pc == prev_pc:
-                pass
-        except Exception as e:
-            print(f"Error executing opcode {hex(self.opcode)}: {e}")
-
+    def update_timers(self):
         if self.delayTimer > 0:
             self.delayTimer -= 1
         if self.soundTimer > 0:
@@ -144,7 +148,6 @@ class Chip8:
         return self.randGen.randint(0, 255)
 
     # --- OPCODES --- #
-
     def OP_00E0(self):
         self.video.fill(0)
         self.pc += 2
@@ -153,9 +156,7 @@ class Chip8:
         if self.sp > 0:
             self.sp -= 1
             self.pc = self.stack[self.sp]
-            print(f"[00EE] Returning to address: {hex(self.pc)} | SP now: {self.sp}")
         else:
-            print("[00EE] ERROR: Stack underflow — no return address to pop.")
             self.pc = START_ADDRESS
 
     def OP_1nnn(self):
@@ -164,12 +165,9 @@ class Chip8:
 
     def OP_2nnn(self):
         address = self.opcode & 0x0FFF
-        print(f"[2NNN] At PC: {hex(self.pc)}, calling subroutine at: {hex(address)}")
-
         if self.sp < len(self.stack):
             self.stack[self.sp] = self.pc + 2
             self.sp += 1
-            print(f"[2NNN] Stack push: return address {hex(self.pc + 2)} | SP now: {self.sp}")
             self.pc = address
         else:
             print("[2NNN] ERROR: Stack overflow — unable to push return address.")
@@ -177,24 +175,18 @@ class Chip8:
     def OP_3xkk(self):
         Vx = (self.opcode & 0x0F00) >> 8
         byte = self.opcode & 0x00FF
-        print(f"Checking if V{Vx} == {byte}: {self.registers[Vx]}")
         if self.registers[Vx] == byte:
-            self.pc += 4  # skip next instruction
-            print(f"Condition met, skipping next instruction. New PC: {self.pc}")
+            self.pc += 4
         else:
             self.pc += 2
-            print(f"Condition not met, PC: {self.pc}")
 
     def OP_4xkk(self):
         Vx = (self.opcode & 0x0F00) >> 8
         byte = self.opcode & 0x00FF
-        print(f"Checking if V{Vx} != {byte}: {self.registers[Vx]}")
         if self.registers[Vx] != byte:
-            self.pc += 4  # skip next instruction
-            print(f"Condition met, skipping next instruction. New PC: {self.pc}")
+            self.pc += 4
         else:
             self.pc += 2
-            print(f"Condition not met, PC: {self.pc}")
 
     def OP_5xy0(self):
         Vx = (self.opcode & 0x0F00) >> 8
@@ -251,10 +243,7 @@ class Chip8:
     def OP_8xy5(self):
         Vx = (self.opcode & 0x0F00) >> 8
         Vy = (self.opcode & 0x00F0) >> 4
-        if self.registers[Vx] > self.registers[Vy]:
-            self.registers[0xF] = 1
-        else:
-            self.registers[0xF] = 0
+        self.registers[0xF] = 1 if self.registers[Vx] > self.registers[Vy] else 0
         self.registers[Vx] = (self.registers[Vx] - self.registers[Vy]) & 0xFF
         self.pc += 2
 
@@ -267,10 +256,7 @@ class Chip8:
     def OP_8xy7(self):
         Vx = (self.opcode & 0x0F00) >> 8
         Vy = (self.opcode & 0x00F0) >> 4
-        if self.registers[Vy] > self.registers[Vx]:
-            self.registers[0xF] = 1
-        else:
-            self.registers[0xF] = 0
+        self.registers[0xF] = 1 if self.registers[Vy] > self.registers[Vx] else 0
         self.registers[Vx] = (self.registers[Vy] - self.registers[Vx]) & 0xFF
         self.pc += 2
 
@@ -291,16 +277,11 @@ class Chip8:
     def OP_Annn(self):
         address = self.opcode & 0x0FFF
         self.index = address
-        print(f"Setting index register I to: {hex(self.index)}")
         self.pc += 2
 
     def OP_Bnnn(self):
         address = self.opcode & 0x0FFF
-        jump_address = self.registers[0] + address
-        if jump_address < 0x200 or jump_address >= len(self.memory):
-            print(f"Invalid jump address: {hex(jump_address)}")
-        else:
-            self.pc = jump_address
+        self.pc = self.registers[0] + address
 
     def OP_Cxkk(self):
         Vx = (self.opcode & 0x0F00) >> 8
@@ -312,10 +293,8 @@ class Chip8:
         Vx = (self.opcode & 0x0F00) >> 8
         Vy = (self.opcode & 0x00F0) >> 4
         height = self.opcode & 0x000F
-
         xPos = self.registers[Vx] % VIDEO_WIDTH
         yPos = self.registers[Vy] % VIDEO_HEIGHT
-
         self.registers[0xF] = 0
 
         for row in range(height):
@@ -325,7 +304,6 @@ class Chip8:
                 spritePixel = (spriteByte & mask) != 0
                 screenX = (xPos + col) % VIDEO_WIDTH
                 screenY = (yPos + row) % VIDEO_HEIGHT
-
                 if spritePixel:
                     if self.video[screenY, screenX]:
                         self.registers[0xF] = 1
@@ -355,14 +333,12 @@ class Chip8:
 
     def OP_Fx0A(self):
         Vx = (self.opcode & 0x0F00) >> 8
-        print(f"Waiting for key press for V{Vx}...")
         for i in range(16):
             if self.keypad[i]:
                 self.registers[Vx] = i
-                print(f"Key {i} pressed, storing in V{Vx}")
                 self.pc += 2
                 return
-        # If no key pressed, do not increment PC (wait)
+        # If no key pressed, do not increment PC
 
     def OP_Fx15(self):
         Vx = (self.opcode & 0x0F00) >> 8
@@ -388,16 +364,10 @@ class Chip8:
     def OP_Fx33(self):
         Vx = (self.opcode & 0x0F00) >> 8
         value = self.registers[Vx]
-
-        # Ones place
         self.memory[self.index + 2] = value % 10
         value //= 10
-
-        # Tens place
         self.memory[self.index + 1] = value % 10
         value //= 10
-
-        # Hundreds place
         self.memory[self.index] = value % 10
         self.pc += 2
 
@@ -412,3 +382,122 @@ class Chip8:
         for i in range(Vx + 1):
             self.registers[i] = self.memory[self.index + i]
         self.pc += 2
+
+# --- RENDER --- #
+
+class Platform:
+    def __init__(self, title, window_width, window_height, texture_width, texture_height):
+        pygame.init()
+        self.window = pygame.display.set_mode((window_width, window_height))
+        pygame.display.set_caption(title)
+        self.texture_width = texture_width
+        self.texture_height = texture_height
+
+    def update(self, buffer):
+        rgb_array = np.stack([buffer * 255]*3, axis=2).astype(np.uint8)
+        rgb_array = np.transpose(rgb_array, (1, 0, 2))  # swap height & width axes
+        surf = pygame.surfarray.make_surface(rgb_array)
+        surf = pygame.transform.scale(surf, (self.window.get_width(), self.window.get_height()))
+        self.window.fill((0, 0, 0))
+        self.window.blit(surf, (0, 0))
+        pygame.display.flip()
+
+    def process_input(self, keys):
+        quit_game = False
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                quit_game = True
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    quit_game = True
+                self.handle_keydown(event.key, keys)
+            elif event.type == pygame.KEYUP:
+                self.handle_keyup(event.key, keys)
+        return quit_game
+
+    def handle_keydown(self, key, keys):
+        key_mapping = {
+            pygame.K_x: 0,
+            pygame.K_1: 1,
+            pygame.K_2: 2,
+            pygame.K_3: 3,
+            pygame.K_q: 4,
+            pygame.K_w: 5,
+            pygame.K_e: 6,
+            pygame.K_a: 7,
+            pygame.K_s: 8,
+            pygame.K_d: 9,
+            pygame.K_z: 0xA,
+            pygame.K_c: 0xB,
+            pygame.K_4: 0xC,
+            pygame.K_r: 0xD,
+            pygame.K_f: 0xE,
+            pygame.K_v: 0xF,
+        }
+        if key in key_mapping:
+            keys[key_mapping[key]] = 1
+
+    def handle_keyup(self, key, keys):
+        key_mapping = {
+            pygame.K_x: 0,
+            pygame.K_1: 1,
+            pygame.K_2: 2,
+            pygame.K_3: 3,
+            pygame.K_q: 4,
+            pygame.K_w: 5,
+            pygame.K_e: 6,
+            pygame.K_a: 7,
+            pygame.K_s: 8,
+            pygame.K_d: 9,
+            pygame.K_z: 0xA,
+            pygame.K_c: 0xB,
+            pygame.K_4: 0xC,
+            pygame.K_r: 0xD,
+            pygame.K_f: 0xE,
+            pygame.K_v: 0xF,
+        }
+        if key in key_mapping:
+            keys[key_mapping[key]] = 0
+
+# --- EXECUTE --- #
+
+def main():
+    if len(sys.argv) != 4:
+        print(f"Usage: {sys.argv[0]} <Scale> <CyclesPerFrame> <ROM>")
+        sys.exit(1)
+
+    video_scale = int(sys.argv[1])
+    cycles_per_frame = int(sys.argv[2])   # cycles per 1/60th sec (try 10-20 for accuracy, 100 for speed)
+    rom_filename = sys.argv[3]
+
+    platform = Platform(
+        "CHIP-8 Emulator",
+        VIDEO_WIDTH * video_scale,
+        VIDEO_HEIGHT * video_scale,
+        VIDEO_WIDTH,
+        VIDEO_HEIGHT
+    )
+    chip8 = Chip8()
+    chip8.load_rom(rom_filename)
+
+    clock = pygame.time.Clock()
+    TIMER_TICK = 1/cycles_per_frame  # 60Hz
+    last_timer_update = time.time()
+    quit_game = False
+
+    while not quit_game:
+        quit_game = platform.process_input(chip8.keypad)
+        for _ in range(cycles_per_frame):
+            chip8.cycle()
+        # Timers at 60Hz
+        current_time = time.time()
+        if current_time - last_timer_update >= TIMER_TICK:
+            chip8.update_timers()
+            last_timer_update += TIMER_TICK
+        platform.update(chip8.video)
+        clock.tick((cycles_per_frame*3.75))  # Cap at 60 FPS
+
+    pygame.quit()
+
+if __name__ == "__main__":
+    main()
